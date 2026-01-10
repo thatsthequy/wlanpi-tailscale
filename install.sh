@@ -13,6 +13,13 @@ ensure_cmd() {
     fi
 }
 
+# Use sudo only when needed
+if [[ "$EUID" -ne 0 ]]; then
+    SUDO=sudo
+else
+    SUDO=""
+fi
+
 # --- Install Tailscale -----------------------------------------------------
 
 install_tailscale() {
@@ -22,7 +29,8 @@ install_tailscale() {
     fi
 
     log "Installing Tailscale…"
-    curl -fsSL https://tailscale.com/install.sh | sh
+    # Run remote installer as root if not already root.
+    curl -fsSL https://tailscale.com/install.sh | ${SUDO} sh
 }
 
 # --- Enable IP Forwarding for Exit Node -----------------------------------
@@ -32,34 +40,53 @@ enable_ip_forwarding() {
     CONF_FILE="/etc/sysctl.d/99-tailscale.conf"
 
     # Create file if it doesn't exist
-    sudo touch "$CONF_FILE"
+    ${SUDO} touch "$CONF_FILE"
 
     # Append if missing (idempotent)
     grep -qxF 'net.ipv4.ip_forward = 1' "$CONF_FILE" \
-        || echo 'net.ipv4.ip_forward = 1' | sudo tee -a "$CONF_FILE" >/dev/null
+        || echo 'net.ipv4.ip_forward = 1' | ${SUDO} tee -a "$CONF_FILE" >/dev/null
 
     grep -qxF 'net.ipv6.conf.all.forwarding = 1' "$CONF_FILE" \
-        || echo 'net.ipv6.conf.all.forwarding = 1' | sudo tee -a "$CONF_FILE" >/dev/null
+        || echo 'net.ipv6.conf.all.forwarding = 1' | ${SUDO} tee -a "$CONF_FILE" >/dev/null
 
     # Apply settings immediately
-    sudo sysctl -p "$CONF_FILE"
+    ${SUDO} sysctl -p "$CONF_FILE"
+}
+
+# --- Wait for Tailscale to be ready --------------------------------------
+
+wait_for_self_json() {
+    # Wait up to a number of attempts for tailscale status to return JSON with Self fields
+    local max_tries=60
+    local try=0
+    while (( try < max_tries )); do
+        # shells: allow failure and capture output
+        if json=$({ tailscale status --json 2>/dev/null || true; }); then
+            if [[ -n "$json" && "$json" != "null" ]]; then
+                printf '%s' "$json"
+                return 0
+            fi
+        fi
+        ((try++))
+        log "Waiting for Tailscale to be ready (attempt $try/$max_tries)…"
+        sleep 2
+    done
+    return 1
 }
 
 # --- Configure Tailscale flags --------------------------------------------
 
 set_tailscale_flags() {
     log "Configuring Tailscale flags…"
-    tailscale set \
-        --advertise-exit-node \
-        --accept-dns=false \
-        --ssh || true
+    # tolerate failure so script can continue if not yet authenticated
+    tailscale set --advertise-exit-node --accept-dns=false --ssh || true
 }
 
 # --- Bring Tailscale up with QR auth --------------------------------------
 
 bring_tailscale_up() {
     if tailscale status >/dev/null 2>&1; then
-        log "Tailscale already up."
+        log "Tailscale already running."
     else
         log "Starting Tailscale (scan the QR code to authenticate)…"
         tailscale up --qr
@@ -70,11 +97,17 @@ bring_tailscale_up() {
 
 get_fqdn() {
     log "Detecting Tailscale FQDN…"
-    FQDN="$(tailscale status --json | jq -r '.Self.DNSName' | sed 's/\.$//')"
+    json="$(wait_for_self_json)" || {
+        err "Timed out waiting for tailscale status JSON."
+        return 1
+    }
+
+    # Prefer DNSName, fall back to Hostname or Name. Strip trailing dot if present.
+    FQDN="$(printf '%s' "$json" | jq -r '.Self.DNSName // .Self.Hostname // .Self.Name // ""' | sed 's/\.$//')"
 
     if [[ -z "$FQDN" || "$FQDN" == "null" ]]; then
         err "Failed to detect FQDN from Tailscale status JSON."
-        exit 1
+        return 1
     fi
 
     echo "$FQDN"
@@ -83,9 +116,24 @@ get_fqdn() {
 # --- Request HTTPS certificate --------------------------------------------
 
 request_cert() {
-    FQDN="$1"
-    log "Requesting HTTPS certificate for $FQDN…"
-    tailscale cert "$FQDN"
+    local fqdn="$1"
+    log "Requesting HTTPS certificate for $fqdn…"
+
+    # Save combined PEM (cert+key) to a local path with restrictive permissions.
+    local dest_dir="/etc/ssl/tailscale"
+    local tmpfile
+    tmpfile="$(mktemp)"
+
+    if tailscale cert "$fqdn" >"$tmpfile" 2>/dev/null; then
+        ${SUDO} mkdir -p "$dest_dir"
+        ${SUDO} mv "$tmpfile" "$dest_dir/${fqdn}.pem"
+        ${SUDO} chmod 600 "$dest_dir/${fqdn}.pem"
+        log "Saved cert to $dest_dir/${fqdn}.pem (permission 600)."
+    else
+        rm -f "$tmpfile"
+        err "tailscale cert failed for $fqdn"
+        return 1
+    fi
 }
 
 # --- Configure Tailscale serve --------------------------------------------
@@ -103,13 +151,25 @@ main() {
 
     install_tailscale
     enable_ip_forwarding
-    set_tailscale_flags
+
     bring_tailscale_up
 
-    FQDN="$(get_fqdn)"
+    # Wait for tailscale to be up and reporting Self before continuing
+    if ! wait_for_self_json >/dev/null; then
+        err "Tailscale did not become ready in time. Ensure you completed QR authentication."
+        exit 1
+    fi
+
+    set_tailscale_flags
+
+    FQDN="$(get_fqdn)" || exit 1
     log "Detected FQDN: $FQDN"
 
-    request_cert "$FQDN"
+    # Request and save a certificate (optional). Continue even if it fails.
+    if ! request_cert "$FQDN"; then
+        log "Warning: certificate request failed; continuing."
+    fi
+
     configure_serve
 
     log "All done!"
