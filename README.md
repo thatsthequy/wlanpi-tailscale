@@ -1,8 +1,6 @@
 # WLAN Pi Tailscale Installer
 
-This script installs and configures Tailscale on a WLAN Pi, enables it as an
-exit node, requests a TLS certificate, and exposes the internal web server
-over Tailscale serve with a valid HTTPS certificate.
+This script installs and configures Tailscale on a WLAN Pi, configures it for Tailscale SSH, enables it as an exit node, requests a TLS certificate, and exposes the internal web server over Tailscale serve with a valid HTTPS certificate.
 
 ## Quick Install
 
