@@ -1,2 +1,10 @@
-# wlanpi-tailscale
-The script does the following: ✔ Installs Tailscale ✔ Sets flags (exit-node, ssh, disable DNS, hostname) ✔ Brings Tailscale up (auth required) ✔ Discovers the device’s FQDN from Tailscale state ✔ Issues HTTPS cert automatically ✔ Configures tailscale serve over port 443
+# WLAN Pi Tailscale Installer
+
+This script installs and configures Tailscale on a WLAN Pi, enables it as an
+exit node, requests a TLS certificate, and exposes the internal web server
+over Tailscale HTTPS.
+
+## Quick Install
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/<youruser>/wlanpi-tailscale-install/main/install.sh | sudo bash
