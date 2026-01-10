@@ -25,6 +25,26 @@ install_tailscale() {
     curl -fsSL https://tailscale.com/install.sh | sh
 }
 
+# --- Enable IP Forwarding for Exit Node -----------------------------------
+
+enable_ip_forwarding() {
+    log "Enabling IP forwarding for Exit Node support…"
+    CONF_FILE="/etc/sysctl.d/99-tailscale.conf"
+
+    # Create file if it doesn't exist
+    sudo touch "$CONF_FILE"
+
+    # Append if missing (idempotent)
+    grep -qxF 'net.ipv4.ip_forward = 1' "$CONF_FILE" \
+        || echo 'net.ipv4.ip_forward = 1' | sudo tee -a "$CONF_FILE" >/dev/null
+
+    grep -qxF 'net.ipv6.conf.all.forwarding = 1' "$CONF_FILE" \
+        || echo 'net.ipv6.conf.all.forwarding = 1' | sudo tee -a "$CONF_FILE" >/dev/null
+
+    # Apply settings immediately
+    sudo sysctl -p "$CONF_FILE"
+}
+
 # --- Configure Tailscale flags --------------------------------------------
 
 set_tailscale_flags() {
@@ -82,6 +102,7 @@ main() {
     ensure_cmd jq
 
     install_tailscale
+    enable_ip_forwarding
     set_tailscale_flags
     bring_tailscale_up
 
