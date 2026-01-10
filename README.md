@@ -7,4 +7,4 @@ over Tailscale HTTPS.
 ## Quick Install
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/<youruser>/wlanpi-tailscale-install/main/install.sh | sudo bash
+curl -fsSL https://github.com/thatsthequy/wlanpi-tailscale/blob/main/install.sh | sudo bash
