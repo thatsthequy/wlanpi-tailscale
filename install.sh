@@ -15,7 +15,9 @@ set -euo pipefail
 
 # --- Helpers ---------------------------------------------------------------
 
-log() { echo -e "[+] $*"; }
+# Send informational logs to stderr so command substitution (which captures
+# stdout) does not pick them up.
+log() { echo -e "[+] $*" >&2; }
 err() { echo -e "[!] $*" >&2; }
 
 ensure_cmd() {
@@ -92,6 +94,8 @@ set_tailscale_flags() {
     log "Configuring Tailscale flags…"
     # tolerate failure so script can continue if not yet authenticated
     tailscale set --advertise-exit-node --accept-dns=false --ssh || true
+    # If you want this node to accept subnet routes advertised by peers, enable:
+    # tailscale set --accept-routes || true
 }
 
 # --- Bring Tailscale up with QR auth --------------------------------------
