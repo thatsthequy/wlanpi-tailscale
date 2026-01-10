@@ -1,4 +1,16 @@
 #!/usr/bin/env bash
+
+# If the script was started under /bin/sh (dash), re-exec under bash so we can
+# safely use bash-specific features like 'set -o pipefail'.
+if [ -z "${BASH_VERSION:-}" ]; then
+    if command -v bash >/dev/null 2>&1; then
+        exec bash "$0" "$@"
+    else
+        echo "This script requires bash. Please run with 'bash install.sh'." >&2
+        exit 1
+    fi
+fi
+
 set -euo pipefail
 
 # --- Helpers ---------------------------------------------------------------
